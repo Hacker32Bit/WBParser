@@ -1,0 +1,9 @@
+yake
+requests
+spacy
+pytextrank
+keybert
+hf_xet
+yake
+g4f
+rich
