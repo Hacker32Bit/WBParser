@@ -411,7 +411,7 @@ Give me top {max_keywords} keywords for search in shops:
             answer = answer.split("###BEGIN_FORMAT###")[1]
         answer = answer.strip()
 
-        keywords = answer.split("ζ")
+        keywords = [s for s in answer.split("ζ") if s]
         return keywords
     else:
         return []
