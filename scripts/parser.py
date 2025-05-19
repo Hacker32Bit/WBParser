@@ -4,6 +4,7 @@ import re
 import sys
 import math
 import time
+import argparse
 import traceback
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -17,7 +18,7 @@ from keybert import KeyBERT
 from spacy.cli import download
 
 # g4f (OpenAI/GPT-like interface)
-from g4f.models import default
+from g4f.models import gpt_4
 from g4f.client import Client
 
 # Rich (console formatting)
@@ -25,17 +26,22 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-
-
 PARAMS: Dict = {
     "URL_OR_ID": None,
     "SCAN_DESCRIPTION": False,
     "MODEL": None,
     "PATH": 'data',
     # Необходимо указать DEST(Пункт выдачи. Для поиска). Найти можно в консоле. OPTIONS | search.wb.ru
-    "DEST": -1257786, # г Москва, ул Никольская д. 7-9, стр. 4
-    "DEBUG": True, # Print stages
+    "DEST": -1257786,  # г Москва, ул Никольская д. 7-9, стр. 4
+    "DEBUG": True,  # Print stages
 }
+
+# Define the parser
+parser = argparse.ArgumentParser(description='WB Parser')
+parser.add_argument('--url', action="store", dest='url_or_id', default="")
+parser.add_argument('--desc', action=argparse.BooleanOptionalAction)
+parser.add_argument('--model', action="store", dest='model', default="")
+parser.add_argument('--dest', action="store", dest='dest', default=-1257786)
 
 YES_ARRAY = ["yes", "y", "да", "д", "1", "true"]
 NO_ARRAY = ["no", "n", "нет", "н", "не", "0", "false"]
@@ -386,21 +392,21 @@ def extract_keywords_chatgpt(text: str, max_keywords: int = 10) -> List:
 
     content = f"""
 ###BEGIN_FORMAT###
-keyword1ζkeyword2ζkeyword3ζ...
+keyword1ζkeyword2ζkeyword3ζ...ζkeyword10
 ###END_FORMAT###
 Give me top {max_keywords} keywords for search in shops:
 \"{text}\"
     """
 
     response = client.chat.completions.create(
-        model=default,
+        model=gpt_4,
         messages=[{"role": "user", "content": content}],
     )
 
     answer = response.choices[0].message.content
     if answer[:16] == "New g4f version:":
         try:
-            answer = answer.split("pip install -U g4f")[1]
+            answer = answer.split("pip install -U g4f")[1].strip()
         except IndexError:
             answer = None
 
@@ -409,7 +415,7 @@ Give me top {max_keywords} keywords for search in shops:
             answer = answer.split("###END_FORMAT###")[0]
         if "###BEGIN_FORMAT###" in answer:
             answer = answer.split("###BEGIN_FORMAT###")[1]
-        answer = answer.strip()
+        answer = answer.replace("```", "").replace("\n", " ").replace("  ", " ").strip()
 
         keywords = [s for s in answer.split("ζ") if s]
         return keywords
@@ -468,18 +474,19 @@ def find_keywords(content: Dict) -> List:
 
 
 def search_position(query: str, url: str, article: str) -> Dict:
-    sys.stdout.write(
-        Color.BOLD + Color.DARK_CYAN + f"[*] Searching for card positions by \"{query}\" query..." + Color.END)
-    sys.stdout.flush()
+    if PARAMS["DEBUG"]:
+        sys.stdout.write(
+            Color.BOLD + Color.DARK_CYAN + f"[*] Searching for card positions by \"{query}\" query..." + Color.END)
+        sys.stdout.flush()
 
-    res = { "hits": 0, "total_position": 0, "total_pages": 0, "page": 0, "page_position": 0,}
+    res = {"hits": 0, "total_position": 0, "total_pages": 0, "page": 0, "page_position": 0, }
 
     page = 1
     dest = PARAMS["DEST"]
     position = 0
 
-    search_url = "https://search.wb.ru/exactmatch/sng/common/v13/search?curr=rub&dest={}&lang=ru&page={}&query={}&resultset=catalog&sort=popular".format(dest, page, query)
-
+    search_url = "https://search.wb.ru/exactmatch/sng/common/v13/search?curr=rub&dest={}&lang=ru&page={}&query={}&resultset=catalog&sort=popular".format(
+        dest, page, query)
 
     try:
         response = requests.get(search_url, headers=HEADERS)
@@ -490,8 +497,9 @@ def search_position(query: str, url: str, article: str) -> Dict:
 
         hits = obj.get("data", {}).get('total', 0)
         if hits == 0:
-            clear_line()
-            print(Color.BOLD + Color.RED + f"[-] Items found for query \"{query}\"." + Color.END)
+            if PARAMS["DEBUG"]:
+                clear_line()
+                print(Color.BOLD + Color.RED + f"[-] Items not found for query \"{query}\"." + Color.END)
             return res
 
         res["hits"] = hits
@@ -505,13 +513,14 @@ def search_position(query: str, url: str, article: str) -> Dict:
                 res["total_position"] = position
                 res["page"] = page
                 res["page_position"] = idx + 1
-                # Clear line and print completion
-                clear_line()
-                print(Color.BOLD + Color.GREEN + f"[+] Search \"{query}\" parsing completed!" + Color.END)
+                if PARAMS["DEBUG"]:
+                    clear_line()
+                    print(Color.BOLD + Color.GREEN + f"[+] Search \"{query}\" parsing completed!" + Color.END)
                 return res
 
         for page in range(2, total_pages + 1):
-            search_url = "https://search.wb.ru/exactmatch/sng/common/v13/search?curr=rub&dest={}&lang=ru&page={}&query={}&resultset=catalog&sort=popular".format(dest, page, query)
+            search_url = "https://search.wb.ru/exactmatch/sng/common/v13/search?curr=rub&dest={}&lang=ru&page={}&query={}&resultset=catalog&sort=popular".format(
+                dest, page, query)
             response = requests.get(search_url, headers=HEADERS)
             if response.status_code == 200:
                 obj = response.json()
@@ -525,19 +534,22 @@ def search_position(query: str, url: str, article: str) -> Dict:
                     res["total_position"] = position
                     res["page"] = page
                     res["page_position"] = idx + 1
-                    # Clear line and print completion
-                    clear_line()
-                    print(Color.BOLD + Color.GREEN + f"[+] Search \"{query}\" parsing completed!" + Color.END)
+                    if PARAMS["DEBUG"]:
+                        # Clear line and print completion
+                        clear_line()
+                        print(Color.BOLD + Color.GREEN + f"[+] Search \"{query}\" parsing completed!" + Color.END)
                     return res
 
     except Exception as err:
         print(traceback.format_exc())
         print(Color.BOLD + Color.RED + str(err) + Color.END)
 
-    # Print a warning if not found
-    clear_line()
-    print(Color.BOLD + Color.YELLOW + f"[!] Article {article} not found for query \"{query}\"." + Color.END)
+    if PARAMS["DEBUG"]:
+        # Print a warning if not found
+        clear_line()
+        print(Color.BOLD + Color.YELLOW + f"[!] Article {article} not found for query \"{query}\"." + Color.END)
     return res
+
 
 def print_table_of_result(obj):
     console = Console()
@@ -548,7 +560,7 @@ def print_table_of_result(obj):
     # Info table
     info_table = Table(show_header=False, box=None)
     info_table.add_row("URL", obj["url"])
-    info_table.add_row("Article", obj["article"])
+    info_table.add_row("Article", str(obj["article"]))
     console.print(info_table)
 
     # Main table header
@@ -603,30 +615,52 @@ def clear_line():
     sys.stdout.flush()
 
 
+def arg_parse():
+    args = parser.parse_args()
+    PARAMS["DEST"] = args.dest
+    PARAMS["MODEL"] = args.model
+    PARAMS["URL_OR_ID"] = args.url_or_id
+
+    try:
+        if PARAMS["URL_OR_ID"].isdigit():
+            PARAMS["URL_OR_ID"] = int(PARAMS["URL_OR_ID"])
+    except ValueError:
+        pass
+
+    PARAMS["SCAN_DESCRIPTION"] = args.desc
+
+    return True if args.url_or_id else False
+
+
 def main():
-    json_files = get_configs()
+    is_parsed = arg_parse()
 
-    if len(json_files):
-        print("Список конфигураций загружены!")
+    if is_parsed:
+        PARAMS["DEBUG"] = False
     else:
-        print(Color.YELLOW + "Конфигурации не найдены! Создаём первую конфигурацию..." + Color.END)
-        create_config()
+        json_files = get_configs()
 
-    while len(json_files):
-        print(
-            Color.BOLD + Color.GREEN + "[ACTION]" + Color.END + Color.GREEN + "Выберете действие:" + Color.END)
-        print(Color.DARK_CYAN + "1) Выбрать готовую конфигурацию" + Color.END)
-        print(Color.DARK_CYAN + "2) Создать новую конфигурацию" + Color.END)
-        answer = input("Укажите целое число 1 или 2: ")
-        if answer == "1":
-            break
-        elif answer == "2":
+        if len(json_files):
+            print("Список конфигураций загружены!")
+        else:
+            print(Color.YELLOW + "Конфигурации не найдены! Создаём первую конфигурацию..." + Color.END)
             create_config()
 
-        print(Color.RED + "Неправильный ответ!" + Color.END)
-        print(Color.YELLOW + "Пожалуйста, введите 1 из доступных чисел: [1, 2]" + Color.END)
+        while len(json_files):
+            print(
+                Color.BOLD + Color.GREEN + "[ACTION]" + Color.END + Color.GREEN + "Выберете действие:" + Color.END)
+            print(Color.DARK_CYAN + "1) Выбрать готовую конфигурацию" + Color.END)
+            print(Color.DARK_CYAN + "2) Создать новую конфигурацию" + Color.END)
+            answer = input("Укажите целое число 1 или 2: ")
+            if answer == "1":
+                break
+            elif answer == "2":
+                create_config()
 
-    print(Color.BOLD + Color.PURPLE + "Скрипт запущен!" + Color.END)
+            print(Color.RED + "Неправильный ответ!" + Color.END)
+            print(Color.YELLOW + "Пожалуйста, введите 1 из доступных чисел: [1, 2]" + Color.END)
+
+        print(Color.BOLD + Color.PURPLE + "Скрипт запущен!" + Color.END)
 
     # Parsing card
     content, url, article = parse()
