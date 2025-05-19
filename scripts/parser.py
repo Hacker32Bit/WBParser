@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import requests
 import spacy
 import yake
+import pytextrank
 from keybert import KeyBERT
 from spacy.cli import download
 
@@ -209,18 +210,19 @@ def parse() -> tuple[Dict, str, int] or None:
         else:
             raise ConnectionError("Can't get data from WB")
 
-        # Получаем описание из АПИ
+        # Get description from API
         if PARAMS["SCAN_DESCRIPTION"]:
             # Узнаем на каком host-е находится description
             api_url = "https://cdn.wbbasket.ru/api/v3/upstreams"
             response = requests.get(api_url, headers=HEADERS)
             if response.status_code == 200:
                 obj = response.json()
-                host = find_host(obj, 'recommend', 'mediabasket', int(str(article)[:4]))
+                host = find_host(obj, 'recommend', 'mediabasket', int(str(article)[:(len(article) - 5)]))
             else:
                 raise ConnectionError("Can't get data from API")
 
-            card_url = "https://{}/vol{}/part{}/{}/info/ru/card.json".format(host, str(article)[:4], str(article)[:6],
+            card_url = "https://{}/vol{}/part{}/{}/info/ru/card.json".format(host, str(article)[:(len(article) - 5)],
+                                                                             str(article)[:(len(article) - 3)],
                                                                              article)
 
             response = requests.get(card_url, headers=HEADERS)
