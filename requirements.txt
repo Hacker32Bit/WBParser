@@ -7,3 +7,5 @@ hf_xet
 yake
 g4f
 rich
+python-dotenv
+aiogram
